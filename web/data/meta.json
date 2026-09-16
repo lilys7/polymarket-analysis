@@ -1,0 +1,74 @@
+{
+  "n": 600421,
+  "endian": "little",
+  "layout": [
+    "zx",
+    "zy",
+    "zz",
+    "x_raw",
+    "y_raw",
+    "z_raw",
+    "pnl",
+    "ppv",
+    "hhi",
+    "outlier",
+    "cluster",
+    "label"
+  ],
+  "axes": {
+    "x": "Price book impact (z-scored)",
+    "y": "Execution timing variance (z-scored)",
+    "z": "Order size magnitude (z-scored)"
+  },
+  "raw_axes": {
+    "x": "price_levels_consumed_vw",
+    "y": "std_time_vw",
+    "z": "log_mean_tx_value"
+  },
+  "noise_label": -1,
+  "top_cluster_ids": [
+    1172,
+    635,
+    637,
+    634,
+    1476,
+    946,
+    1460,
+    1299,
+    962,
+    1461,
+    1474,
+    54
+  ],
+  "top_colors": [
+    "#4e79a7",
+    "#f28e2b",
+    "#e15759",
+    "#76b7b2",
+    "#59a14f",
+    "#edc948",
+    "#b07aa1",
+    "#ff9da7",
+    "#9c755f",
+    "#bab0ac",
+    "#86bcb6",
+    "#d37295"
+  ],
+  "noise_color": "#6b7280",
+  "other_dense_color": "#8b5cf6",
+  "label_colors": {
+    "awful": "#e15759",
+    "bad": "#f28e2b",
+    "good": "#4e79a7",
+    "sharp": "#59a14f",
+    "unlabeled": "#9ca3af"
+  },
+  "label_names": {
+    "0": "awful",
+    "1": "bad",
+    "2": "good",
+    "3": "sharp",
+    "4": "unlabeled"
+  },
+  "bytes": 25818103
+}
