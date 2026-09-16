@@ -28,18 +28,26 @@
     select { background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 4px 6px; }
     button {
       background: var(--bg); color: var(--text); border: 1px solid var(--line);
-      padding: 6px 8px; cursor: pointer; width: 100%;
+      padding: 6px 8px; cursor: pointer;
     }
     button:hover { border-color: var(--accent); }
+    #reset { width: 100%; }
+    .btn-row { display: flex; gap: 6px; margin: 8px 0; }
+    .btn-row button { flex: 1; }
     #status { margin-top: 8px; font-variant-numeric: tabular-nums; }
-    #pick {
+    #pick, #clusterStats {
       margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
       font-variant-numeric: tabular-nums;
     }
-    #pick b { color: var(--text); }
-    #legend { margin-top: 10px; display: grid; gap: 4px; }
+    #pick b, #clusterStats b { color: var(--text); }
+    #legend, #clusterList { margin-top: 10px; display: grid; gap: 4px; }
     .swatch { display: flex; align-items: center; gap: 6px; }
+    .swatch.selectable { cursor: pointer; padding: 3px 4px; border: 1px solid transparent; }
+    .swatch.selectable:hover { border-color: var(--line); }
+    .swatch.selected { border-color: var(--accent); background: #243044; }
+    .swatch.dim { opacity: 0.4; }
     .dot { width: 8px; height: 8px; border-radius: 1px; flex: 0 0 8px; }
+    h2 { font-size: 12px; font-weight: 600; color: var(--text); margin: 12px 0 4px; }
     kbd { color: var(--text); }
   </style>
   <script type="importmap">
@@ -55,7 +63,7 @@
   <canvas id="c"></canvas>
   <aside id="ui">
     <h1>Polymarket 3D execution space</h1>
-    <p>Each point is one trader. Drag to rotate, scroll to zoom, right-drag to pan. Click a point for details.</p>
+    <p>Each point is one trader. Drag to rotate, scroll to zoom, right-drag to pan. Click a point for details. Click a cluster name to show only that group; click again to remove it.</p>
     <div class="row"><span>Color by</span></div>
     <select id="colorMode">
       <option value="cluster">Spatial cluster</option>
@@ -63,10 +71,16 @@
       <option value="hhi">HHI (specialization)</option>
       <option value="ppv">PPV (profit rate)</option>
     </select>
-    <div class="row"><label><input type="checkbox" id="hideNoise" /> Hide noise (−1)</label></div>
     <div class="row"><span>Point size</span></div>
     <input id="size" type="range" min="0.004" max="0.04" step="0.001" value="0.012" />
     <button id="reset" type="button">Reset camera</button>
+    <h2>Clusters</h2>
+    <div class="btn-row">
+      <button id="showAll" type="button">Show all</button>
+      <button id="hideAll" type="button">Hide all</button>
+    </div>
+    <div id="clusterList"></div>
+    <div id="clusterStats"></div>
     <div id="status">Loading point cloud…</div>
     <div id="pick">Click a point to inspect PnL, PPV, HHI, cluster, and label.</div>
     <div id="legend"></div>

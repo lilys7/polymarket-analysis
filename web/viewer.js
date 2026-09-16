@@ -5,10 +5,13 @@ const canvas = document.getElementById("c");
 const statusEl = document.getElementById("status");
 const pickEl = document.getElementById("pick");
 const legendEl = document.getElementById("legend");
+const clusterListEl = document.getElementById("clusterList");
+const clusterStatsEl = document.getElementById("clusterStats");
 const colorModeEl = document.getElementById("colorMode");
-const hideNoiseEl = document.getElementById("hideNoise");
 const sizeEl = document.getElementById("size");
 const resetEl = document.getElementById("reset");
+const showAllEl = document.getElementById("showAll");
+const hideAllEl = document.getElementById("hideAll");
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -30,12 +33,12 @@ const pointer = new THREE.Vector2();
 
 let meta;
 let arrays;
-let densePoints;
-let noisePoints;
-let denseIndex;
-let noiseIndex;
-let denseColors;
-let noiseColors;
+let viewPoints = null;
+let viewIndex = new Uint32Array(0);
+
+// empty selected + hideAll=false => original (everything on)
+const selected = new Set();
+let hideAll = false;
 
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -66,6 +69,12 @@ function parseBin(buffer, meta) {
   return { zx, zy, zz, xRaw, yRaw, zRaw, pnl, ppv, hhi, outlier, cluster, label };
 }
 
+function clusterKey(cid) {
+  if (cid === meta.noise_label) return "noise";
+  if (meta.top_cluster_ids.includes(cid)) return String(cid);
+  return "other";
+}
+
 function clusterColor(clusterId) {
   if (clusterId === meta.noise_label) return hexToRgb(meta.noise_color);
   const idx = meta.top_cluster_ids.indexOf(clusterId);
@@ -92,31 +101,53 @@ function colorFor(i, mode) {
   return lerpColor([0.85, 0.25, 0.25], [0.25, 0.75, 0.35], (arrays.ppv[i] + 0.4) / 0.8);
 }
 
-function paint(attr, indexMap, mode) {
-  for (let k = 0; k < indexMap.length; k++) {
-    const rgb = colorFor(indexMap[k], mode);
-    attr.setXYZ(k, rgb[0], rgb[1], rgb[2]);
+function isShowingAll() {
+  return !hideAll && selected.size === 0;
+}
+
+function pointVisible(i) {
+  if (isShowingAll()) return true;
+  if (hideAll && selected.size === 0) return false;
+  return selected.has(clusterKey(arrays.cluster[i]));
+}
+
+function collectVisible() {
+  const ids = [];
+  for (let i = 0; i < meta.n; i++) {
+    if (pointVisible(i)) ids.push(i);
   }
-  attr.needsUpdate = true;
+  return ids;
 }
 
-function fillColors(mode) {
-  paint(denseColors, denseIndex, mode);
-  paint(noiseColors, noiseIndex, mode);
+function disposeView() {
+  if (!viewPoints) return;
+  scene.remove(viewPoints);
+  viewPoints.geometry.dispose();
+  viewPoints.material.dispose();
+  viewPoints = null;
 }
 
-function makeCloud(indexMap, colorAttr) {
-  const m = indexMap.length;
+function rebuildView() {
+  const ids = collectVisible();
+  viewIndex = Uint32Array.from(ids);
+  disposeView();
+  const m = ids.length;
   const positions = new Float32Array(m * 3);
+  const colors = new Float32Array(m * 3);
+  const mode = colorModeEl.value;
   for (let k = 0; k < m; k++) {
-    const i = indexMap[k];
+    const i = ids[k];
     positions[k * 3] = arrays.zx[i];
     positions[k * 3 + 1] = arrays.zy[i];
     positions[k * 3 + 2] = arrays.zz[i];
+    const rgb = colorFor(i, mode);
+    colors[k * 3] = rgb[0];
+    colors[k * 3 + 1] = rgb[1];
+    colors[k * 3 + 2] = rgb[2];
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("color", colorAttr);
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.PointsMaterial({
     size: Number(sizeEl.value),
     vertexColors: true,
@@ -125,10 +156,64 @@ function makeCloud(indexMap, colorAttr) {
     opacity: 0.82,
     depthWrite: false,
   });
-  const cloud = new THREE.Points(geometry, mat);
-  cloud.userData.indexMap = indexMap;
-  scene.add(cloud);
-  return cloud;
+  viewPoints = new THREE.Points(geometry, mat);
+  scene.add(viewPoints);
+  updateStats(ids);
+  updateClusterList();
+  const n = ids.length;
+  if (isShowingAll()) {
+    statusEl.textContent = `${meta.n.toLocaleString()} traders · showing all`;
+  } else {
+    statusEl.textContent = `${n.toLocaleString()} traders visible`;
+  }
+}
+
+function fillColors(mode) {
+  if (!viewPoints) return;
+  const colors = viewPoints.geometry.getAttribute("color");
+  for (let k = 0; k < viewIndex.length; k++) {
+    const rgb = colorFor(viewIndex[k], mode);
+    colors.setXYZ(k, rgb[0], rgb[1], rgb[2]);
+  }
+  colors.needsUpdate = true;
+}
+
+function clusterItems() {
+  return [
+    { key: "noise", color: meta.noise_color, text: "noise (−1)" },
+    { key: "other", color: meta.other_dense_color, text: "other dense" },
+    ...meta.top_cluster_ids.map((id, i) => ({
+      key: String(id),
+      color: meta.top_colors[i],
+      text: `cluster ${id}`,
+    })),
+  ];
+}
+
+function updateClusterList() {
+  if (!clusterListEl.children.length) {
+    clusterItems().forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "swatch selectable";
+      row.dataset.key = item.key;
+      row.innerHTML = `<span class="dot" style="background:${item.color}"></span><span>${item.text}</span>`;
+      row.addEventListener("click", () => toggleCluster(item.key));
+      clusterListEl.appendChild(row);
+    });
+  }
+  const showingAll = isShowingAll();
+  clusterListEl.querySelectorAll(".swatch").forEach((row) => {
+    const on = selected.has(row.dataset.key);
+    row.classList.toggle("selected", on);
+    row.classList.toggle("dim", !showingAll && !on);
+  });
+}
+
+function toggleCluster(key) {
+  hideAll = false;
+  if (selected.has(key)) selected.delete(key);
+  else selected.add(key);
+  rebuildView();
 }
 
 function renderLegend(mode) {
@@ -139,11 +224,8 @@ function renderLegend(mode) {
     row.innerHTML = `<span class="dot" style="background:${color}"></span><span>${text}</span>`;
     legendEl.appendChild(row);
   };
-  if (mode === "cluster") {
-    add(meta.noise_color, "noise (−1)");
-    add(meta.other_dense_color, "other dense");
-    meta.top_cluster_ids.forEach((id, i) => add(meta.top_colors[i], `cluster ${id}`));
-  } else if (mode === "label") {
+  if (mode === "cluster") return;
+  if (mode === "label") {
     Object.entries(meta.label_colors).forEach(([k, v]) => add(v, k));
   } else if (mode === "hhi") {
     add("#38468c", "low HHI (generalist)");
@@ -157,6 +239,39 @@ function renderLegend(mode) {
 function fmt(x, d = 3) {
   if (!Number.isFinite(x)) return "—";
   return x.toLocaleString(undefined, { maximumFractionDigits: d });
+}
+
+function pct(part, n) {
+  return n ? ((100 * part) / n).toFixed(1) : "0.0";
+}
+
+function updateStats(ids) {
+  const n = ids.length;
+  if (!n) {
+    clusterStatsEl.innerHTML = "<b>Visible set</b><br/>no traders";
+    return;
+  }
+  let pnl = 0;
+  let ppv = 0;
+  let hhi = 0;
+  let sharp = 0;
+  let awful = 0;
+  for (let k = 0; k < n; k++) {
+    const i = ids[k];
+    pnl += arrays.pnl[i];
+    ppv += arrays.ppv[i];
+    hhi += arrays.hhi[i];
+    if (arrays.label[i] === 3) sharp += 1;
+    if (arrays.label[i] === 0) awful += 1;
+  }
+  clusterStatsEl.innerHTML = `
+    <b>Visible set</b><br/>
+    n: ${n.toLocaleString()}<br/>
+    mean pnl: ${fmt(pnl / n, 2)}<br/>
+    mean ppv: ${fmt(ppv / n, 4)}<br/>
+    mean hhi: ${fmt(hhi / n, 3)}<br/>
+    sharp: ${pct(sharp, n)}% · awful: ${pct(awful, n)}%
+  `;
 }
 
 function showPick(i) {
@@ -182,14 +297,14 @@ function showPick(i) {
 }
 
 function onPointer(event) {
+  if (!viewPoints || !viewIndex.length) return;
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects([densePoints, noisePoints].filter(Boolean));
+  const hits = raycaster.intersectObject(viewPoints);
   if (!hits.length) return;
-  const map = hits[0].object.userData.indexMap;
-  showPick(map[hits[0].index]);
+  showPick(viewIndex[hits[0].index]);
 }
 
 async function load() {
@@ -205,42 +320,31 @@ async function load() {
     return;
   }
   arrays = parseBin(await binRes.arrayBuffer(), meta);
-
-  const dense = [];
-  const noise = [];
-  for (let i = 0; i < meta.n; i++) {
-    if (arrays.cluster[i] === meta.noise_label) noise.push(i);
-    else dense.push(i);
-  }
-  denseIndex = Uint32Array.from(dense);
-  noiseIndex = Uint32Array.from(noise);
-  denseColors = new THREE.BufferAttribute(new Float32Array(denseIndex.length * 3), 3);
-  noiseColors = new THREE.BufferAttribute(new Float32Array(noiseIndex.length * 3), 3);
-  densePoints = makeCloud(denseIndex, denseColors);
-  noisePoints = makeCloud(noiseIndex, noiseColors);
-
-  fillColors(colorModeEl.value);
-  noisePoints.visible = !hideNoiseEl.checked;
+  rebuildView();
   renderLegend(colorModeEl.value);
-  statusEl.textContent = `${meta.n.toLocaleString()} traders · drag to orbit`;
 }
 
 colorModeEl.addEventListener("change", () => {
   fillColors(colorModeEl.value);
   renderLegend(colorModeEl.value);
 });
-hideNoiseEl.addEventListener("change", () => {
-  if (noisePoints) noisePoints.visible = !hideNoiseEl.checked;
-});
 sizeEl.addEventListener("input", () => {
-  const s = Number(sizeEl.value);
-  if (densePoints) densePoints.material.size = s;
-  if (noisePoints) noisePoints.material.size = s;
+  if (viewPoints) viewPoints.material.size = Number(sizeEl.value);
 });
 resetEl.addEventListener("click", () => {
   camera.position.set(2.4, 1.8, 2.6);
   controls.target.set(0, 0, 0);
   controls.update();
+});
+showAllEl.addEventListener("click", () => {
+  hideAll = false;
+  selected.clear();
+  rebuildView();
+});
+hideAllEl.addEventListener("click", () => {
+  hideAll = true;
+  selected.clear();
+  rebuildView();
 });
 canvas.addEventListener("click", onPointer);
 
